@@ -1,0 +1,13 @@
+{
+	"image": "ghcr.io/wjtje/prizmsdkdocker:main",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools-extension-pack",
+				"ms-vscode.makefile-tools"
+			],
+			"settings": {
+			}
+		}
+	}
+}

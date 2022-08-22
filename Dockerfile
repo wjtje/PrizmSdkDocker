@@ -1,55 +1,69 @@
-FROM debian:bullseye
+FROM debian:bullseye as toolchain
 
+ARG binutils=2.39
+ARG gcc=12.2.0
+
+LABEL maintainer="Wouter van der Wal <me@wjtje.dev>"
+WORKDIR /
+
+# Install all the required packages
 RUN \
-    # Install all the required packages
     apt update && \
-    apt install -y binutils build-essential cmake gcc git lbzip2 libgmp-dev libmpc-dev libmpfr-dev libpng-dev make texinfo wget xz-utils && \
-    # Make basic folder structure
-    cd /usr && \
-    chmod a+rw src && \
-    mkdir /usr/local/cross && \
-    cd src && \
-    mkdir build-gcc build-binutils && \
-    # Download binutils
-    wget https://ftp.gnu.org/gnu/binutils/binutils-2.39.tar.bz2 && \
+    apt install -y binutils build-essential cmake gcc git lbzip2 libgmp-dev libmpc-dev libmpfr-dev libpng-dev make texinfo wget xz-utils
+
+# Download and build binutils
+RUN \
+    echo "Installing binutils ${binutils}" && \
+    wget https://ftp.gnu.org/gnu/binutils/binutils-${binutils}.tar.bz2 && \
     tar -xf binutils*.tar.bz2 && \
-    rm binutils*.tar.bz2 && \
-    mv binutils* binutils && \
-    # Download gcc
-    wget https://ftp.gnu.org/gnu/gcc/gcc-12.2.0/gcc-12.2.0.tar.xz && \
+    mkdir /build-binutils && cd /build-binutils && \
+    ../binutils-${binutils}/configure --target=sh3eb-elf --prefix=/usr/local/cross --disable-nls --disable-werror && \
+    make -j$(nproc) && \
+    make install
+
+# Download and build gcc
+RUN \
+    echo "Installing gcc ${gcc}" && \
+    wget https://ftp.gnu.org/gnu/gcc/gcc-${gcc}/gcc-${gcc}.tar.xz && \
     tar -xf gcc*.tar.xz && \
-    rm gcc*.tar.xz && \
-    mv gcc* gcc && \
-    # Compile binutls
-    cd build-binutils && \
-    ../binutils/./configure --target=sh3eb-elf --prefix=/usr/local/cross --disable-nls --disable-werror && \
-    make -j6 && \
-    make install && \
-    # Compile gcc
-    export PATH=$PATH:/usr/local/cross/bin && \
-    cd /usr/src/build-gcc && \
-    ../gcc/./configure --target=sh3eb-elf --prefix=/usr/local/cross -enable-sjlj-exceptions --disable-hosted-libstdcxx --with-gnu-as --with-gnu-ld --enable-languages=c,c++ --disable-nls --disable-tls --disable-libssp --disable-threads --disable-shared --disable-__cxa_atexit && \
-    make all-gcc -j6 && \
+    mkdir /build-gcc && cd /build-gcc && \
+    ../gcc-${gcc}/configure --target=sh3eb-elf --prefix=/usr/local/cross --enable-languages=c,c++ \
+    --with-newlib --without-headers --disable-hosted-libstdcxx --disable-nls --disable-shared --disable-multilib && \
+    make all-gcc -j$(nproc) && \
     make install-gcc && \
-    make all-target-libgcc -j6 && \
-    make install-target-libgcc && \
-    # Compile mkg3a
-    cd /usr/src && \
-    wget https://gitlab.com/taricorp/mkg3a/-/archive/master/mkg3a-master.tar.gz && \
-    tar -xf mkg3a*.tar.gz && \
-    rm mkg3a*.tar.gz && \
-    mv mkg3a* mkg3a && \
+    make all-target-libgcc -j$(nproc) && \
+    make install-target-libgcc
+
+# Download and build mkg3a
+RUN \
+    git clone https://gitlab.com/taricorp/mkg3a.git && \
     cd mkg3a && \
     cmake . && \
-    make && \
-    make install && \
-    # Cleanup
-    cd /usr/src && \
-    rm -rf * && \
-    # Compile libfxcg
+    make -j$(nproc) && \
+    make install
+
+# Download libfxcg
+FROM debian:bullseye-slim
+
+ARG fxcg=0.5.2
+
+COPY --from=toolchain /usr/local /usr/local
+WORKDIR /usr/src
+ENV PATH=$PATH:/usr/local/cross/bin
+
+RUN \
+    apt update && \
+    apt install -y git curl make libmpc-dev libpng-dev
+
+# Compile libfxcg
+RUN \
     git clone https://github.com/Jonimoose/libfxcg.git && \
     cd libfxcg && \
-    sed -i 's/sh3eb-elf-/\/usr\/local\/cross\/bin\/sh3eb-elf-/g' toolchain/prizm_rules
+    git checkout tags/v${fxcg} && \
+    sed -i 's/sh3eb-elf-/\/usr\/local\/cross\/bin\/sh3eb-elf-/g' toolchain/prizm_rules && \
+    make
 
-ENV PATH=$PATH:/usr/local/cross/bin
+# Add missing header files
+COPY include /usr/src/libfxcg/include
+
 ENV FXCGSDK=/usr/src/libfxcg
